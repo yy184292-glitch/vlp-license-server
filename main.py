@@ -8,8 +8,11 @@ from sqlalchemy import select
 from db import make_engine, make_session_factory
 from models import Base, License, Machine, Nonce, Log
 from security import sign, safe_eq, now_unix
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
+
+app.mount("/content", StaticFiles(directory="content"), name="content")
 
 DB_URL = os.getenv("DB_URL", "sqlite:///./vlp_auth.db")
 LICENSE_SECRET = os.getenv("LICENSE_SECRET") or ""
