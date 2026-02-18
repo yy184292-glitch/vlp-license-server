@@ -18,6 +18,9 @@ DB_URL = os.getenv("DB_URL", "sqlite:///./vlp_auth.db")
 LICENSE_SECRET = os.getenv("LICENSE_SECRET") or ""
 ISSUER_ADMIN_TOKEN = os.getenv("ISSUER_ADMIN_TOKEN") or ""
 
+
+MAIN_MAX_DEVICES = int(os.getenv("MAIN_MAX_DEVICES", "1"))
+PRO_MAX_DEVICES = int(os.getenv("PRO_MAX_DEVICES", "2"))
 TS_WINDOW_SEC = int(os.getenv("TS_WINDOW_SEC", "300"))
 NONCE_TTL_SEC = int(os.getenv("NONCE_TTL_SEC", "600"))
 
@@ -50,6 +53,13 @@ def require_admin(req: Request):
     token = auth.removeprefix("Bearer ").strip()
     if token != ISSUER_ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail="invalid admin token")
+
+
+def max_devices_for_plan(plan: str) -> int:
+    p = (plan or "").strip().upper()
+    if p == "PRO":
+        return max(1, PRO_MAX_DEVICES)
+    return max(1, MAIN_MAX_DEVICES)
 
 def add_log(db: Session, *, actor: str, action: str, ip: str, result="ok", reason="", license_key="", machine_id="", meta=None):
     db.add(Log(
@@ -115,13 +125,24 @@ def verify(req: Request, body: VerifyReq, db: Session = Depends(get_db)):
                 license_key=body.license_key, machine_id=body.machine_id)
         return {"valid": False, "reason": "expired", "server_time": st}
 
-    # machine tracking
+    # machine tracking (auto-bind on first activation with device limit)
+    max_dev = max_devices_for_plan(lic.plan)
+
     m = db.execute(select(Machine).where(
         Machine.license_key == body.license_key,
         Machine.machine_id == body.machine_id
     )).scalar_one_or_none()
 
     if not m:
+        # first time on this machine: enforce device limit (count only non-banned machines)
+        rows = db.execute(select(Machine).where(Machine.license_key == body.license_key)).scalars().all()
+        active_machine_ids = [x.machine_id for x in rows if not getattr(x, "is_banned", False)]
+        if len(active_machine_ids) >= max_dev:
+            add_log(db, actor="verify", action="verify", ip=ip, result="ng", reason="device_limit_reached",
+                    license_key=body.license_key, machine_id=body.machine_id,
+                    meta={"max_devices": max_dev, "devices_bound": len(active_machine_ids)})
+            return {"valid": False, "reason": "device_limit_reached", "server_time": st}
+
         db.add(Machine(license_key=body.license_key, machine_id=body.machine_id))
     else:
         if getattr(m, "is_banned", False):
