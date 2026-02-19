@@ -171,7 +171,14 @@ class IssueReq(BaseModel):
     phone: str = ""
     memo: str = ""
     plan: str = "PRO"
+
+    # GUI互換（新規）: expires_on（YYYY-MM-DD）または days を受け取れるようにする
+    expires_on: str | None = None
+    days: int | None = None
+
+    # 旧互換（既存クライアント向け）
     add_days: int = 365
+
     features: dict = {"main": True}
 
 @app.post("/admin/issue")
@@ -181,7 +188,22 @@ def admin_issue(req: Request, body: IssueReq, db: Session = Depends(get_db)):
 
     # license key generation (simple and strong enough)
     key = "VLP-" + secrets.token_hex(16).upper()
-    expires = date.today() + timedelta(days=int(body.add_days))
+    # 優先順位: expires_on > days > add_days
+    if body.expires_on:
+        try:
+            expires = date.fromisoformat(body.expires_on.strip())
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid expires_on (use YYYY-MM-DD)")
+    elif body.days is not None:
+        try:
+            d = int(body.days)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid days")
+        if d <= 0:
+            raise HTTPException(status_code=400, detail="days must be positive")
+        expires = date.today() + timedelta(days=d)
+    else:
+        expires = date.today() + timedelta(days=int(body.add_days))
 
     lic = License(
         license_key=key,
