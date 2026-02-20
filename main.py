@@ -39,7 +39,7 @@ if not ADMIN_TOKENS:
 
 engine = make_engine(DB_URL)
 SessionLocal = make_session_factory(engine)
-Base.metadata.create_all(engine)
+
 
 # ---------- customer (admin managed) ----------
 class Customer(Base):
@@ -50,6 +50,8 @@ class Customer(Base):
     memo = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+Base.metadata.create_all(engine)
 
 
 def get_db():
